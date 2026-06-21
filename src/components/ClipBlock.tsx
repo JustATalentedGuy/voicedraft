@@ -1,4 +1,5 @@
 import { formatDuration } from '../lib/utils'
+import { getEffectiveDuration } from '../lib/audio'
 import type { Clip } from '../types'
 
 export default function ClipBlock({
@@ -18,10 +19,12 @@ export default function ClipBlock({
   progress: number
   onSelect: () => void
 }) {
+  const effectiveDuration = getEffectiveDuration(clip)
+
   return (
     <button
       type="button"
-      aria-label={`Clip ${index + 1}, ${formatDuration(clip.durationSec)}`}
+      aria-label={`Clip ${index + 1}, ${formatDuration(effectiveDuration)}`}
       aria-pressed={selected}
       data-clip-id={clip.id}
       onClick={(event) => {
@@ -37,18 +40,23 @@ export default function ClipBlock({
     >
       <span className="block text-[11px] font-medium">Clip {index + 1}</span>
       <span className="absolute bottom-1 left-2 font-mono text-[11px]">
-        {formatDuration(clip.durationSec)}
+        {formatDuration(effectiveDuration)}
       </span>
-      {clip.markers.map((marker) => (
+      {clip.markers.filter((marker) => marker <= effectiveDuration).map((marker) => (
         <span
           key={marker}
           aria-hidden="true"
           className="absolute top-0 h-full w-px bg-white/80"
           style={{
-            left: `${Math.min(100, (marker / clip.durationSec) * 100)}%`,
+            left: `${Math.min(100, (marker / effectiveDuration) * 100)}%`,
           }}
         />
       ))}
+      {clip.trimEndSec !== undefined && (
+        <span className="absolute right-1 top-1 rounded bg-black/35 px-1 text-[9px] text-white">
+          trimmed
+        </span>
+      )}
       {playing && (
         <span
           aria-hidden="true"

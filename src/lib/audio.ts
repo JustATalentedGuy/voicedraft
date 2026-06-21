@@ -1,7 +1,16 @@
+import type { Clip } from '../types'
+
 function writeString(view: DataView, offset: number, value: string): void {
   for (let index = 0; index < value.length; index++) {
     view.setUint8(offset + index, value.charCodeAt(index))
   }
+}
+
+export function getEffectiveDuration(clip: Clip): number {
+  return Math.min(
+    clip.durationSec,
+    Math.max(0.25, clip.trimEndSec ?? clip.durationSec),
+  )
 }
 
 export function encodeWAV(samples: Float32Array, sampleRate: number): Blob {
@@ -47,71 +56,63 @@ export async function blobToAudioBuffer(blob: Blob): Promise<AudioBuffer> {
   }
 }
 
-export function findLastPause(
-  channelData: Float32Array,
-  sampleRate: number,
-  thresholdAmplitude = 0.02,
-  windowMs = 300,
-): number {
-  const windowSamples = Math.max(
-    1,
-    Math.floor((windowMs / 1000) * sampleRate),
-  )
-  const totalSamples = channelData.length
-  const stepSize = Math.max(1, Math.floor(windowSamples / 2))
-
-  for (
-    let start = totalSamples - windowSamples;
-    start >= 0;
-    start -= stepSize
-  ) {
-    let maxAmplitude = 0
-    const end = Math.min(start + windowSamples, totalSamples)
-
-    for (let index = start; index < end; index++) {
-      const amplitude = Math.abs(channelData[index])
-      if (amplitude > maxAmplitude) {
-        maxAmplitude = amplitude
-      }
-    }
-
-    if (maxAmplitude >= thresholdAmplitude) {
-      return Math.min(start + windowSamples, totalSamples)
-    }
-  }
-
-  return 0
-}
-
-export function trimAudioBuffer(
+export function sliceAudioBuffer(
   source: AudioBuffer,
-  trimSec: number,
+  startSec = 0,
+  endSec = source.duration,
 ): AudioBuffer {
-  const trimSample = Math.floor(Math.max(0, trimSec) * source.sampleRate)
-  const length = Math.min(trimSample, source.length)
-
-  if (length === 0) {
-    return new AudioBuffer({
-      length: 1,
-      numberOfChannels: 1,
-      sampleRate: source.sampleRate,
-    })
-  }
-
-  const trimmedBuffer = new AudioBuffer({
+  const startSample = Math.min(
+    source.length,
+    Math.max(0, Math.floor(startSec * source.sampleRate)),
+  )
+  const endSample = Math.min(
+    source.length,
+    Math.max(startSample + 1, Math.floor(endSec * source.sampleRate)),
+  )
+  const length = endSample - startSample
+  const slicedBuffer = new AudioBuffer({
     length,
     numberOfChannels: 1,
     sampleRate: source.sampleRate,
   })
-  trimmedBuffer.copyToChannel(source.getChannelData(0).slice(0, length), 0)
-  return trimmedBuffer
+  slicedBuffer.copyToChannel(
+    source.getChannelData(0).slice(startSample, endSample),
+    0,
+  )
+  return slicedBuffer
+}
+
+export async function buildWaveformPeaks(
+  blob: Blob,
+  barCount: number,
+): Promise<number[]> {
+  const audioBuffer = await blobToAudioBuffer(blob)
+  const samples = audioBuffer.getChannelData(0)
+  const count = Math.max(1, Math.floor(barCount))
+  const samplesPerBar = Math.max(1, Math.floor(samples.length / count))
+  const peaks: number[] = []
+  let maximum = 0
+
+  for (let bar = 0; bar < count; bar++) {
+    const start = bar * samplesPerBar
+    const end = bar === count - 1
+      ? samples.length
+      : Math.min(samples.length, start + samplesPerBar)
+    let sumSquares = 0
+    for (let index = start; index < end; index++) {
+      sumSquares += samples[index] ** 2
+    }
+    const rms = Math.sqrt(sumSquares / Math.max(1, end - start))
+    maximum = Math.max(maximum, rms)
+    peaks.push(rms)
+  }
+
+  if (maximum === 0) return peaks.map(() => 0.04)
+  return peaks.map((peak) => Math.max(0.04, peak / maximum))
 }
 
 export function mergeAudioBuffers(buffers: AudioBuffer[]): AudioBuffer {
-  if (buffers.length === 0) {
-    throw new Error('No buffers to merge')
-  }
-
+  if (buffers.length === 0) throw new Error('No buffers to merge')
   const sampleRate = buffers[0].sampleRate
   if (buffers.some((buffer) => buffer.sampleRate !== sampleRate)) {
     throw new Error('All buffers must use the same sample rate')
@@ -127,38 +128,20 @@ export function mergeAudioBuffers(buffers: AudioBuffer[]): AudioBuffer {
     sampleRate,
   })
   const output = mergedBuffer.getChannelData(0)
-
   let offset = 0
+
   for (const buffer of buffers) {
     output.set(buffer.getChannelData(0), offset)
     offset += buffer.length
   }
-
   return mergedBuffer
 }
 
-export async function trimBlobToLastPause(
-  blob: Blob,
-  thresholdAmplitude: number,
-  windowMs: number,
-): Promise<{ trimmedBuffer: AudioBuffer; trimSec: number }> {
-  const audioBuffer = await blobToAudioBuffer(blob)
-  const trimSample = findLastPause(
-    audioBuffer.getChannelData(0),
-    audioBuffer.sampleRate,
-    thresholdAmplitude,
-    windowMs,
-  )
-  const trimSec = trimSample / audioBuffer.sampleRate
-
-  return {
-    trimmedBuffer: trimAudioBuffer(audioBuffer, trimSec),
-    trimSec,
-  }
-}
-
-export async function exportSessionAsWAV(blobs: Blob[]): Promise<Blob> {
-  const audioBuffers = await Promise.all(blobs.map(blobToAudioBuffer))
+export async function exportSessionAsWAV(clips: Clip[]): Promise<Blob> {
+  const audioBuffers = await Promise.all(clips.map(async (clip) => {
+    const decoded = await blobToAudioBuffer(clip.blob)
+    return sliceAudioBuffer(decoded, 0, getEffectiveDuration(clip))
+  }))
   const mergedBuffer = mergeAudioBuffers(audioBuffers)
   return encodeWAV(
     mergedBuffer.getChannelData(0),

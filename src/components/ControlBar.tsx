@@ -16,8 +16,7 @@ export default function ControlBar({
   onPlayClip,
   onDeleteClip,
   onRecord,
-  onTrimPause,
-  onTrimMarker,
+  onOpenTrim,
   onRedo,
   onPlayAll,
 }: {
@@ -33,14 +32,11 @@ export default function ControlBar({
   onPlayClip: (clip: Clip) => void
   onDeleteClip: (clip: Clip) => void
   onRecord: () => void
-  onTrimPause: () => void
-  onTrimMarker: () => void
+  onOpenTrim: () => void
   onRedo: () => void
   onPlayAll: () => void
 }) {
   const hasClips = clips.length > 0
-  const lastClip = clips.at(-1)
-  const hasMarkers = (lastClip?.markers.length ?? 0) > 0
   const busy = recorderState === 'recording' || recorderState === 'processing'
 
   return (
@@ -58,25 +54,15 @@ export default function ControlBar({
         onDeleteClip={onDeleteClip}
       />
 
-      <div className="flex h-11 shrink-0 gap-2">
+      <div className="flex h-11 shrink-0">
         <button
           type="button"
           disabled={!hasClips || busy}
-          onClick={onTrimPause}
-          className="min-h-11 flex-1 rounded-lg bg-surfaceHigh px-2 text-xs text-textMuted transition-colors duration-150 disabled:opacity-40"
+          onClick={onOpenTrim}
+          className="min-h-11 w-full rounded-lg bg-surfaceHigh px-3 text-sm font-medium text-textMuted transition-colors duration-150 hover:text-accentLight disabled:opacity-40"
         >
-          Trim to last pause
+          Trim end
         </button>
-        {hasMarkers && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={onTrimMarker}
-            className="min-h-11 flex-1 rounded-lg bg-surfaceHigh px-2 text-xs text-textMuted transition-colors duration-150 disabled:opacity-40"
-          >
-            Trim to last marker
-          </button>
-        )}
       </div>
 
       <div className="relative flex min-h-0 flex-1 items-center justify-center">

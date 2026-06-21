@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import ControlBar from '../components/ControlBar'
 import ExportButton from '../components/ExportButton'
 import Toast from '../components/Toast'
+import TrimEditor from '../components/TrimEditor'
 import { usePlayback } from '../hooks/usePlayback'
 import { useRecorder } from '../hooks/useRecorder'
 import { useSettings } from '../hooks/useSettings'
@@ -10,7 +11,6 @@ import { useTimeline } from '../hooks/useTimeline'
 import { useToast } from '../hooks/useToast'
 import { getClipsForScript } from '../lib/db'
 import { getScript } from '../lib/storage'
-import { formatDuration } from '../lib/utils'
 import type { Clip, Script } from '../types'
 
 export default function RecordingPage() {
@@ -27,9 +27,10 @@ export default function RecordingPage() {
   const [flashedParagraphId, setFlashedParagraphId] = useState<string | null>(
     null,
   )
+  const [trimClip, setTrimClip] = useState<Clip | null>(null)
   const flashTimerRef = useRef<number | null>(null)
   const playback = usePlayback()
-  const timeline = useTimeline(id, settings)
+  const timeline = useTimeline(id)
   const {
     playing,
     currentClipId,
@@ -42,8 +43,8 @@ export default function RecordingPage() {
     clips,
     loading,
     addClip,
-    trimLastClip,
-    trimLastClipToMarker,
+    setLastClipTrim,
+    resetLastClipTrim,
     deleteLastClip,
     deleteSpecificClip,
     totalDuration,
@@ -99,6 +100,13 @@ export default function RecordingPage() {
       window.clearTimeout(flashTimerRef.current)
     }
   }, [])
+
+  useEffect(() => {
+    if (!trimClip) return
+    const closeOnBack = () => setTrimClip(null)
+    window.addEventListener('popstate', closeOnBack)
+    return () => window.removeEventListener('popstate', closeOnBack)
+  }, [trimClip])
 
   const stopPlayback = useCallback(() => {
     stopAudio()
@@ -173,31 +181,32 @@ export default function RecordingPage() {
     })
   }
 
-  const handleTrimPause = () => {
+  const handleOpenTrim = () => {
     stopPlayback()
-    void trimLastClip().then((trimSec) => {
-      if (trimSec === null) {
-        showToast('No silence found in last clip', 'warn')
-      } else {
-        showToast(`Trimmed to ${formatDuration(trimSec)}`)
-      }
-    }).catch(() => {
-      showToast('Could not trim this clip', 'error')
-    })
+    const lastClip = clips.at(-1)
+    if (lastClip) {
+      window.history.pushState({ voiceDraftTrim: true }, '')
+      setTrimClip(lastClip)
+    }
   }
 
-  const handleTrimMarker = () => {
-    stopPlayback()
-    void trimLastClipToMarker().then((trimSec) => {
-      if (trimSec === null) {
-        showToast('No marker found in last clip', 'warn')
-      } else {
-        showToast(`Trimmed to ${formatDuration(trimSec)}`)
-      }
-    }).catch(() => {
-      showToast('Could not trim to marker', 'error')
-    })
+  const handleApplyTrim = async (endpoint: number) => {
+    const updatedClip = await setLastClipTrim(endpoint)
+    if (!updatedClip) return
+    showToast(`Trimmed to ${Math.floor(endpoint / 60)}:${Math.floor(endpoint % 60).toString().padStart(2, '0')}`)
+    window.history.back()
   }
+
+  const handleResetTrim = async () => {
+    const updatedClip = await resetLastClipTrim()
+    if (!updatedClip) return
+    setTrimClip(updatedClip)
+    showToast('Full clip restored')
+  }
+
+  const handleTrimError = useCallback((message: string) => {
+    showToast(message, 'error')
+  }, [showToast])
 
   const handleBack = async () => {
     if (recorderState === 'recording' || recorderState === 'processing') {
@@ -237,7 +246,7 @@ export default function RecordingPage() {
         <ExportButton
           clips={clips}
           scriptTitle={script.title}
-          disabled={loading || recorderState === 'recording' || recorderState === 'processing'}
+          disabled={loading || trimClip !== null || recorderState === 'recording' || recorderState === 'processing'}
           showToast={showToast}
         />
       </header>
@@ -293,8 +302,7 @@ export default function RecordingPage() {
             onPlayClip={handlePlayClip}
             onDeleteClip={handleDeleteClip}
             onRecord={handleRecord}
-            onTrimPause={handleTrimPause}
-            onTrimMarker={handleTrimMarker}
+            onOpenTrim={handleOpenTrim}
             onRedo={handleRedo}
             onPlayAll={handlePlayAll}
           />
@@ -302,6 +310,17 @@ export default function RecordingPage() {
       </section>
 
       <Toast toast={toast} />
+
+      {trimClip && (
+        <TrimEditor
+          clip={trimClip}
+          clipNumber={clips.length}
+          onApply={handleApplyTrim}
+          onReset={handleResetTrim}
+          onCancel={() => window.history.back()}
+          onError={handleTrimError}
+        />
+      )}
 
       {showLeaveDialog && (
         <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/70 p-4">

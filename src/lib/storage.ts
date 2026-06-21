@@ -6,8 +6,6 @@ const SETTINGS_KEY = 'vd_settings'
 
 const DEFAULT_SETTINGS: Settings = {
   fontSize: 'md',
-  silenceThreshold: 0.02,
-  silenceWindowMs: 300,
   autoPreview: true,
 }
 
@@ -58,9 +56,12 @@ export function deleteScript(id: string): void {
 export function getSettings(): Settings {
   try {
     const savedSettings = localStorage.getItem(SETTINGS_KEY)
-    return savedSettings
-      ? { ...DEFAULT_SETTINGS, ...JSON.parse(savedSettings) as Partial<Settings> }
-      : { ...DEFAULT_SETTINGS }
+    if (!savedSettings) return { ...DEFAULT_SETTINGS }
+    const parsed = JSON.parse(savedSettings) as Partial<Settings>
+    return {
+      fontSize: parsed.fontSize ?? DEFAULT_SETTINGS.fontSize,
+      autoPreview: parsed.autoPreview ?? DEFAULT_SETTINGS.autoPreview,
+    }
   } catch {
     return { ...DEFAULT_SETTINGS }
   }

@@ -1,19 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import {
-  blobToAudioBuffer,
-  encodeWAV,
-  trimAudioBuffer,
-  trimBlobToLastPause,
-} from '../lib/audio'
+import { getEffectiveDuration } from '../lib/audio'
 import {
   deleteAllClipsForScript,
   deleteClip,
   getClipsForScript,
   saveClip,
 } from '../lib/db'
-import type { Clip, Settings } from '../types'
+import type { Clip } from '../types'
 
-export function useTimeline(scriptId: string, settings: Settings) {
+export function useTimeline(scriptId: string) {
   const [clips, setClips] = useState<Clip[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -36,65 +31,31 @@ export function useTimeline(scriptId: string, settings: Settings) {
     ))
   }, [])
 
-  const trimLastClip = useCallback(async (): Promise<number | null> => {
+  const setLastClipTrim = useCallback(async (trimEndSec: number) => {
     const last = clips.at(-1)
     if (!last) return null
-
-    const originalBuffer = await blobToAudioBuffer(last.blob)
-    const { trimmedBuffer, trimSec } = await trimBlobToLastPause(
-      last.blob,
-      settings.silenceThreshold,
-      settings.silenceWindowMs,
+    const endpoint = Math.min(
+      last.durationSec,
+      Math.max(0.25, trimEndSec),
     )
-
-    if (
-      trimSec <= 0
-      || originalBuffer.duration - trimSec < 0.1
-    ) {
-      return null
-    }
-
     const updatedClip: Clip = {
       ...last,
-      blob: encodeWAV(
-        trimmedBuffer.getChannelData(0),
-        trimmedBuffer.sampleRate,
-      ),
-      durationSec: trimSec,
-      markers: last.markers.filter((marker) => marker < trimSec),
+      trimEndSec: endpoint < last.durationSec - 0.005
+        ? endpoint
+        : undefined,
     }
-
     await saveClip(updatedClip)
-    setClips((current) => [
-      ...current.slice(0, -1),
-      updatedClip,
-    ])
-    return trimSec
-  }, [clips, settings.silenceThreshold, settings.silenceWindowMs])
+    setClips((current) => [...current.slice(0, -1), updatedClip])
+    return updatedClip
+  }, [clips])
 
-  const trimLastClipToMarker = useCallback(async (): Promise<number | null> => {
+  const resetLastClipTrim = useCallback(async () => {
     const last = clips.at(-1)
-    const lastMarker = last?.markers.at(-1)
-    if (!last || lastMarker === undefined) return null
-
-    const audioBuffer = await blobToAudioBuffer(last.blob)
-    const trimmedBuffer = trimAudioBuffer(audioBuffer, lastMarker)
-    const updatedClip: Clip = {
-      ...last,
-      blob: encodeWAV(
-        trimmedBuffer.getChannelData(0),
-        trimmedBuffer.sampleRate,
-      ),
-      durationSec: lastMarker,
-      markers: last.markers.filter((marker) => marker < lastMarker),
-    }
-
+    if (!last || last.trimEndSec === undefined) return null
+    const updatedClip: Clip = { ...last, trimEndSec: undefined }
     await saveClip(updatedClip)
-    setClips((current) => [
-      ...current.slice(0, -1),
-      updatedClip,
-    ])
-    return lastMarker
+    setClips((current) => [...current.slice(0, -1), updatedClip])
+    return updatedClip
   }, [clips])
 
   const deleteLastClip = useCallback(async () => {
@@ -115,7 +76,10 @@ export function useTimeline(scriptId: string, settings: Settings) {
   }, [scriptId])
 
   const totalDuration = useMemo(
-    () => clips.reduce((sum, clip) => sum + clip.durationSec, 0),
+    () => clips.reduce(
+      (sum, clip) => sum + getEffectiveDuration(clip),
+      0,
+    ),
     [clips],
   )
   const nextOrderIndex = useMemo(
@@ -130,8 +94,8 @@ export function useTimeline(scriptId: string, settings: Settings) {
     clips,
     loading,
     addClip,
-    trimLastClip,
-    trimLastClipToMarker,
+    setLastClipTrim,
+    resetLastClipTrim,
     deleteLastClip,
     deleteSpecificClip,
     clearAll,

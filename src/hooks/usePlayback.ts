@@ -1,16 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { getEffectiveDuration } from '../lib/audio'
 import type { Clip } from '../types'
+
+interface PlaybackRange {
+  startSec: number
+  endSec: number
+}
 
 export function usePlayback() {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const objectUrlRef = useRef<string | null>(null)
   const sequenceRef = useRef(0)
   const sequenceResolveRef = useRef<(() => void) | null>(null)
+  const stopTimerRef = useRef<number | null>(null)
   const [playing, setPlaying] = useState(false)
   const [currentClipId, setCurrentClipId] = useState<string | null>(null)
   const [progress, setProgress] = useState(0)
+  const [currentTime, setCurrentTime] = useState(0)
 
   const releaseCurrentAudio = useCallback(() => {
+    if (stopTimerRef.current !== null) {
+      window.clearTimeout(stopTimerRef.current)
+      stopTimerRef.current = null
+    }
     const audio = audioRef.current
     if (audio) {
       audio.onended = null
@@ -21,7 +33,6 @@ export function usePlayback() {
       audio.load()
     }
     audioRef.current = null
-
     if (objectUrlRef.current) {
       URL.revokeObjectURL(objectUrlRef.current)
       objectUrlRef.current = null
@@ -36,20 +47,25 @@ export function usePlayback() {
     setPlaying(false)
     setCurrentClipId(null)
     setProgress(0)
+    setCurrentTime(0)
   }, [releaseCurrentAudio])
 
   const playOne = useCallback(async (
     clip: Clip,
     sequence: number,
+    range: PlaybackRange,
   ): Promise<boolean> => {
     releaseCurrentAudio()
     const url = URL.createObjectURL(clip.blob)
     const audio = new Audio(url)
+    const startSec = Math.max(0, range.startSec)
+    const endSec = Math.min(clip.durationSec, Math.max(startSec, range.endSec))
     objectUrlRef.current = url
     audioRef.current = audio
     setCurrentClipId(clip.id)
     setPlaying(true)
     setProgress(0)
+    setCurrentTime(startSec)
 
     return new Promise<boolean>((resolve, reject) => {
       let settled = false
@@ -72,25 +88,41 @@ export function usePlayback() {
         releaseCurrentAudio()
         reject(error)
       }
-      sequenceResolveRef.current = cancel
-      audio.ontimeupdate = () => {
+      const updateProgress = () => {
+        const time = Math.min(endSec, audio.currentTime)
+        setCurrentTime(time)
         setProgress(
-          Number.isFinite(audio.duration) && audio.duration > 0
-            ? Math.min(1, audio.currentTime / audio.duration)
-            : 0,
+          endSec > startSec
+            ? Math.min(1, (time - startSec) / (endSec - startSec))
+            : 1,
         )
+        if (time >= endSec - 0.015) finish(sequenceRef.current === sequence)
       }
+
+      sequenceResolveRef.current = cancel
+      audio.onloadedmetadata = () => {
+        audio.currentTime = startSec
+      }
+      audio.ontimeupdate = updateProgress
       audio.onended = () => finish(sequenceRef.current === sequence)
       audio.onerror = () => fail(new Error('Audio playback failed'))
+      stopTimerRef.current = window.setTimeout(
+        () => finish(sequenceRef.current === sequence),
+        Math.max(50, (endSec - startSec) * 1000 + 150),
+      )
       void audio.play().catch(fail)
     })
   }, [releaseCurrentAudio])
 
-  const playClip = useCallback(async (clip: Clip) => {
+  const playRange = useCallback(async (
+    clip: Clip,
+    startSec: number,
+    endSec: number,
+  ) => {
     stop()
     const sequence = sequenceRef.current
     try {
-      await playOne(clip, sequence)
+      await playOne(clip, sequence, { startSec, endSec })
     } finally {
       if (sequenceRef.current === sequence) {
         setPlaying(false)
@@ -100,14 +132,21 @@ export function usePlayback() {
     }
   }, [playOne, stop])
 
+  const playClip = useCallback(
+    (clip: Clip) => playRange(clip, 0, getEffectiveDuration(clip)),
+    [playRange],
+  )
+
   const playAll = useCallback(async (clips: Clip[]) => {
     stop()
     const sequence = sequenceRef.current
-
     try {
       for (const clip of clips) {
         if (sequenceRef.current !== sequence) break
-        const completed = await playOne(clip, sequence)
+        const completed = await playOne(clip, sequence, {
+          startSec: 0,
+          endSec: getEffectiveDuration(clip),
+        })
         if (!completed) break
       }
     } finally {
@@ -116,6 +155,7 @@ export function usePlayback() {
         setPlaying(false)
         setCurrentClipId(null)
         setProgress(0)
+        setCurrentTime(0)
       }
     }
   }, [playOne, releaseCurrentAudio, stop])
@@ -126,7 +166,9 @@ export function usePlayback() {
     playing,
     currentClipId,
     progress,
+    currentTime,
     playClip,
+    playRange,
     playAll,
     stop,
   }

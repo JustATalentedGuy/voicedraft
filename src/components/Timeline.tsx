@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Clip } from '../types'
+import { getEffectiveDuration } from '../lib/audio'
 import ClipBlock from './ClipBlock'
 
 export default function Timeline({
@@ -68,7 +69,7 @@ export default function Timeline({
             {clips.map((clip, index) => {
               const usableWidth = Math.max(48, containerWidth - 64)
               const proportionalWidth = totalDuration > 0
-                ? (clip.durationSec / totalDuration) * usableWidth
+                ? (getEffectiveDuration(clip) / totalDuration) * usableWidth
                 : 48
               return (
                 <div

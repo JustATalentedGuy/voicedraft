@@ -40,9 +40,7 @@ export default function ExportButton({
     showToast('Preparing export...')
 
     try {
-      const wavBlob = await exportSessionAsWAV(
-        clips.map((clip) => clip.blob),
-      )
+      const wavBlob = await exportSessionAsWAV(clips)
       const filename = createFilename(scriptTitle)
       const url = URL.createObjectURL(wavBlob)
       const anchor = document.createElement('a')

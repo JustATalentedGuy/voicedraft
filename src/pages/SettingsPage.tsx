@@ -1,10 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { useSettings } from '../hooks/useSettings'
-import type {
-  FontSize,
-  SilenceThreshold,
-  SilenceWindowMs,
-} from '../types'
+import type { FontSize } from '../types'
 
 function OptionGroup<T extends string | number>({
   label,
@@ -78,36 +74,6 @@ export default function SettingsPage() {
                 { label: 'Large', value: 'lg' },
               ]}
               onChange={(fontSize) => update({ fontSize })}
-            />
-          </div>
-
-          <div className="py-6">
-            <OptionGroup<SilenceThreshold>
-              label="Silence threshold"
-              value={settings.silenceThreshold}
-              options={[
-                { label: '0.01', value: 0.01 },
-                { label: '0.02', value: 0.02 },
-                { label: '0.05', value: 0.05 },
-              ]}
-              onChange={(silenceThreshold) => update({ silenceThreshold })}
-            />
-            <div className="mt-2 flex justify-between text-xs text-textMuted">
-              <span>Quieter</span>
-              <span>Louder</span>
-            </div>
-          </div>
-
-          <div className="py-6">
-            <OptionGroup<SilenceWindowMs>
-              label="Silence window"
-              value={settings.silenceWindowMs}
-              options={[
-                { label: '200ms', value: 200 },
-                { label: '300ms', value: 300 },
-                { label: '500ms', value: 500 },
-              ]}
-              onChange={(silenceWindowMs) => update({ silenceWindowMs })}
             />
           </div>
 
