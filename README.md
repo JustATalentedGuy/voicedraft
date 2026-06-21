@@ -29,8 +29,14 @@ The production output is written to `dist/`.
 
 ## Deployment
 
-Cloudflare Pages settings:
+This repository is configured for Cloudflare Workers static assets.
+
+```bash
+npm run deploy
+```
+
+For Cloudflare Git builds:
 
 - Build command: `npm run build`
-- Build output directory: `dist`
-- Root directory: `/`
+- Deploy command: `npx wrangler deploy`
+- Production branch: `main`
